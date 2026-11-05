@@ -141,8 +141,7 @@ def save_medicines() -> None:
         atualizado_em=("atualizado_em", "min"),
     )
     table = table.sort_values(["notas_max", "principio_ativo"], ascending=[False, True])
-    table.to_csv(MEDICINES, index=False, encoding="utf-8", lineterminator="
-")
+    table.to_csv(MEDICINES, index=False, encoding="utf-8", lineterminator="\n")
 
 
 def append_history(today: str, term: str, notes: int) -> None:

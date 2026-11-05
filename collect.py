@@ -23,6 +23,7 @@ ROOT = Path(__file__).parent
 CATALOG = ROOT / "data" / "catalogo.csv"
 COUNTS = ROOT / "data" / "notas.csv"
 HISTORY = ROOT / "data" / "historico.csv"
+MEDICINES = ROOT / "data" / "medicamentos.csv"
 
 BASE_URL = "https://www.pje.jus.br/e-natjus"
 USER_AGENT = "Mozilla/5.0 (compatible; remedio-judicial; +https://github.com/dwoloszin/remedio-judicial)"
@@ -117,6 +118,33 @@ def save_counts(rows: dict) -> None:
     table.to_csv(COUNTS, index=False, encoding="utf-8", lineterminator="\n")
 
 
+def save_medicines() -> None:
+    """
+    One row per substance with a range of notes, because its terms can overlap.
+
+    Some terms share no notes (RIBOCICLIBE, SUCCINATO DE RIBOCICLIBE) and others are
+    nested (LOSARTANA, LOSARTANA POTÁSSICA). The true count is therefore between the
+    largest term (notas_min) and the sum of the terms (notas_max).
+    """
+    catalog = pd.read_csv(CATALOG, keep_default_na=False)
+    catalog["termo"] = catalog["termos_busca"].str.split(TERM_SEPARATOR, regex=False)
+    catalog["termos_total"] = catalog["termo"].str.len()
+    rows = catalog.explode("termo").merge(read_counts()[["termo", "notas", "atualizado_em"]], on="termo")
+    rows["notas"] = pd.to_numeric(rows["notas"])
+    table = rows.groupby("principio_ativo", as_index=False).agg(
+        marcas=("marcas", "first"),
+        preco_max=("preco_max", "first"),
+        notas_min=("notas", "max"),
+        notas_max=("notas", "sum"),
+        termos_coletados=("termo", "nunique"),
+        termos_total=("termos_total", "first"),
+        atualizado_em=("atualizado_em", "min"),
+    )
+    table = table.sort_values(["notas_max", "principio_ativo"], ascending=[False, True])
+    table.to_csv(MEDICINES, index=False, encoding="utf-8", lineterminator="
+")
+
+
 def append_history(today: str, term: str, notes: int) -> None:
     is_new = not HISTORY.exists()
     with HISTORY.open("a", encoding="utf-8", newline="\n") as file:
@@ -178,6 +206,7 @@ def main() -> int:
         save_counts(rows)
         done += 1
 
+    save_medicines()
     elapsed = time.monotonic() - started
     known = sum(1 for term in terms["termo"] if term in rows)
     print(f"Collected {done} terms in {elapsed / 60:.1f} min ({elapsed / max(done, 1):.1f} s per term)")

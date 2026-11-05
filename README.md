@@ -29,9 +29,9 @@ which gives the active ingredient. It has no store names or store prices.
 | `n_eans`, `n_lojas` | how many EANs and how many stores matched |
 | `origem` | `cmed` or `extras` |
 
-The search matches the whole name and is accent-sensitive, and e-NatJus records the
-same medicine with and without its salt (`ESILATO DE NINTEDANIBE` and `NINTEDANIBE`).
-That is why one medicine can have two search terms.
+The search is accent-sensitive, and e-NatJus can record the same medicine with and
+without its salt (`ESILATO DE NINTEDANIBE` and `NINTEDANIBE`). That is why one medicine
+can have two search terms.
 
 `.github/workflows/catalog.yml` rebuilds it on day 1 of each month. This is the only
 workflow that reads the store databases, using the `STORE_DATABASE_URLS` repo secret
@@ -53,9 +53,14 @@ extras first, then the highest price, and then whichever count is oldest.
 |------|---------|
 | `data/notas.csv` | latest count per search term |
 | `data/historico.csv` | one row each time a count changes |
+| `data/medicamentos.csv` | one row per substance, with `notas_min` and `notas_max` |
 
-After each run, `save_db.py` copies the CSVs into the tables `catalogo`, `notas` and
-`historico` of `JUDICIAL_DB_URL`, a repo secret. The CSVs remain the source of truth.
+A substance with several terms gets a range, because terms can overlap: some share no
+notes and others are nested. `notas_min` is the largest term and `notas_max` is their
+sum. Substances can also share a term, so these rows must not be added together.
+
+After each run, `save_db.py` copies the CSVs into the tables `catalogo`, `notas`,
+`medicamentos` and `historico` of `JUDICIAL_DB_URL`, a repo secret. The CSVs remain the source of truth.
 
 These counts are per search term. The public search shows fewer notes than the CNJ
 dashboard, and how many fewer varies by medicine, so compare a medicine with its own

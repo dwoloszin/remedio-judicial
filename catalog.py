@@ -6,9 +6,9 @@ EAN is looked up in the official CMED/Anvisa price list, which gives the substan
 A substance enters the catalog when at least one store sells one of its EANs.
 data/extras.csv adds what this misses, such as products outside the CMED list.
 
-The e-NatJus search matches the whole name and is accent-sensitive, and the same
-medicine is recorded both with and without its salt. So each row keeps the CMED
-spelling and lists every name to search in `termos_busca`.
+The e-NatJus search is accent-sensitive, and the same medicine can be recorded both
+with and without its salt. So each row keeps the CMED spelling and lists every name
+to search in `termos_busca`.
 
 The output has no store names or store prices, because it is published. `preco_max`
 is the highest CMED factory price (PF 18%) among the presentations of the substance.

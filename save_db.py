@@ -34,6 +34,16 @@ TABLES = {
         preco_max     NUMERIC(12, 2),
         atualizado_em DATE NOT NULL
     """,
+    "medicamentos": """
+        principio_ativo  TEXT PRIMARY KEY,
+        marcas           TEXT,
+        preco_max        NUMERIC(12, 2),
+        notas_min        INTEGER NOT NULL,
+        notas_max        INTEGER NOT NULL,
+        termos_coletados INTEGER NOT NULL,
+        termos_total     INTEGER NOT NULL,
+        atualizado_em    DATE NOT NULL
+    """,
     "historico": """
         data  DATE NOT NULL,
         termo TEXT NOT NULL,

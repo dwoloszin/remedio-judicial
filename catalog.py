@@ -10,7 +10,8 @@ The e-NatJus search matches the whole name and is accent-sensitive, and the same
 medicine is recorded both with and without its salt. So each row keeps the CMED
 spelling and lists every name to search in `termos_busca`.
 
-The output has no store names and no prices, because it is published.
+The output has no store names or store prices, because it is published. `preco_max`
+is the highest CMED factory price (PF 18%) among the presentations of the substance.
 """
 
 import argparse
@@ -34,7 +35,8 @@ USER_AGENT = "Mozilla/5.0 (compatible; remedio-judicial; +https://github.com/dwo
 ENV_PREFIX = "DATABASE_URL_"
 MAX_BRANDS = 8
 TERM_SEPARATOR = " | "
-MINERALS = {"SÓDIO", "POTÁSSIO", "CÁLCIO", "MAGNÉSIO", "ZINCO", "FERRO", "ALUMÍNIO", "LÍTIO", "BÁRIO", "PRATA", "SELÊNIO", "COBRE", "MANGANÊS", "AMÔNIO"}
+MINERALS = {"SODIO", "POTASSIO", "CALCIO", "MAGNESIO", "ZINCO", "FERRO", "ALUMINIO", "LITIO", "BARIO", "PRATA", "SELENIO", "COBRE", "MANGANES", "AMONIO"}
+PRICE_COLUMN = "PF 18 %"  # factory price: hospital-only products have no consumer price (PMC)
 
 SALT_PREFIX = re.compile(r"^[A-ZÀ-Ý-]+(?:ATO|ETO|ITO|IDRATO) DE (?=\S)")
 SALT_SUFFIX = re.compile(
@@ -70,13 +72,18 @@ def without_salt(name: str) -> str:
     base = SALT_PREFIX.sub("", name)
     while (shorter := SALT_SUFFIX.sub("", base)) != base:
         base = shorter
-    return name if base in MINERALS else base
+    return name if plain(base) in MINERALS else base
 
 
 def search_terms(name: str) -> str:
     """The CMED name, plus the name without its salt. Combinations are searched as written."""
     base = name if ";" in name else without_salt(name)
     return TERM_SEPARATOR.join(dict.fromkeys([name, base]))
+
+
+def to_price(value) -> float:
+    """'2098,20' -> 2098.2. Returns NaN when the cell has no price."""
+    return pd.to_numeric(str(value).replace(".", "").replace(",", "."), errors="coerce")
 
 
 def clean_ean(value) -> str:
@@ -119,7 +126,7 @@ def read_cmed(path: Path) -> pd.DataFrame:
     table.columns = [plain(c) for c in raw.iloc[start]]
 
     ean_columns = [c for c in table.columns if c.startswith("EAN")]
-    required = {"SUBSTANCIA", "PRODUTO", "CLASSE TERAPEUTICA"}
+    required = {"SUBSTANCIA", "PRODUTO", "CLASSE TERAPEUTICA", PRICE_COLUMN}
     missing = required - set(table.columns)
     if missing or not ean_columns:
         raise SystemExit(f"CMED spreadsheet is missing columns: {sorted(missing) or 'EAN'}")
@@ -132,6 +139,7 @@ def read_cmed(path: Path) -> pd.DataFrame:
         "principio_ativo": rows["SUBSTANCIA"].map(clean_name),
         "marca": rows["PRODUTO"].map(clean_name),
         "classe_terapeutica": rows["CLASSE TERAPEUTICA"].map(clean_name),
+        "preco": rows[PRICE_COLUMN].map(to_price),
     }).drop_duplicates()
 
 
@@ -167,7 +175,7 @@ def read_stores(workers: int = 12) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-COLUMNS = ["principio_ativo", "termos_busca", "marcas", "classe_terapeutica", "n_eans", "n_lojas", "origem"]
+COLUMNS = ["principio_ativo", "preco_max", "termos_busca", "marcas", "classe_terapeutica", "n_eans", "n_lojas", "origem"]
 
 
 def build(cmed: pd.DataFrame, stores: pd.DataFrame) -> pd.DataFrame:
@@ -185,6 +193,7 @@ def build(cmed: pd.DataFrame, stores: pd.DataFrame) -> pd.DataFrame:
     extras = extras[~extras["principio_ativo"].isin(catalog["principio_ativo"])]
     extras = extras.assign(n_eans=0, n_lojas=0, origem="extras")
     catalog = pd.concat([catalog, extras[catalog.columns]], ignore_index=True)
+    catalog["preco_max"] = catalog["principio_ativo"].map(cmed.groupby("principio_ativo")["preco"].max()).round(2)
     return catalog[COLUMNS].sort_values("principio_ativo")
 
 

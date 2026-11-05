@@ -1,0 +1,46 @@
+name: Collect e-NatJus counts
+
+on:
+  schedule:
+    - cron: "0 8 * * *" # 05:00 in Brasília
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: Minutes to spend asking
+        default: "55"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Collect
+        run: python collect.py --minutes "${{ inputs.minutes || '55' }}"
+
+      - name: Save progress
+        if: ${{ !cancelled() }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/notas.csv data/historico.csv
+          if git diff --cached --quiet; then
+            echo "Nothing new to save"
+          else
+            git commit -m "Update e-NatJus counts"
+            git pull --rebase
+            git push
+          fi

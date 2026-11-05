@@ -44,3 +44,9 @@ jobs:
             git pull --rebase
             git push
           fi
+
+      - name: Save to the database
+        if: ${{ !cancelled() }}
+        run: python save_db.py
+        env:
+          JUDICIAL_DB_URL: ${{ secrets.JUDICIAL_DB_URL }}

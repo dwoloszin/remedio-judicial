@@ -50,6 +50,9 @@ extras first, then the highest price, and then whichever count is oldest.
 | `data/notas.csv` | latest count per search term |
 | `data/historico.csv` | one row each time a count changes |
 
+After each run, `save_db.py` copies the CSVs into the tables `catalogo`, `notas` and
+`historico` of `JUDICIAL_DB_URL`, a repo secret. The CSVs remain the source of truth.
+
 These counts are per search term. The public search shows fewer notes than the CNJ
 dashboard, and how many fewer varies by medicine, so compare a medicine with its own
 past rather than ranking medicines against each other.

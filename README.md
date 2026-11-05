@@ -33,6 +33,10 @@ The search matches the whole name and is accent-sensitive, and e-NatJus records 
 same medicine with and without its salt (`ESILATO DE NINTEDANIBE` and `NINTEDANIBE`).
 That is why one medicine can have two search terms.
 
+`.github/workflows/catalog.yml` rebuilds it on day 1 of each month. This is the only
+workflow that reads the store databases, using the `STORE_DATABASE_URLS` repo secret
+(the `DATABASE_URL_<STORE>` lines of `.env`). The daily collection does not read them.
+
 ```bash
 pip install -r requirements.txt
 cp .env.template .env        # one DATABASE_URL_<STORE> per store database

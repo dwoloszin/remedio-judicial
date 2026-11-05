@@ -34,6 +34,7 @@ CMED_PAGE = "https://www.gov.br/anvisa/pt-br/assuntos/medicamentos/cmed/precos"
 USER_AGENT = "Mozilla/5.0 (compatible; remedio-judicial; +https://github.com/dwoloszin/remedio-judicial)"
 ENV_PREFIX = "DATABASE_URL_"
 MAX_BRANDS = 8
+MAX_FAILED_STORES = 5  # more than this would drop medicines from the catalog
 TERM_SEPARATOR = " | "
 MINERALS = {"SODIO", "POTASSIO", "CALCIO", "MAGNESIO", "ZINCO", "FERRO", "ALUMINIO", "LITIO", "BARIO", "PRATA", "SELENIO", "COBRE", "MANGANES", "AMONIO"}
 PRICE_COLUMN = "PF 18 %"  # factory price: hospital-only products have no consumer price (PMC)
@@ -170,8 +171,8 @@ def read_stores(workers: int = 12) -> pd.DataFrame:
                 failed.append(store)
                 print(f"  {store}: {type(error).__name__}")  # the message could hold the host
     print(f"{len(frames)}/{len(urls)} stores read" + (f"; failed: {', '.join(failed)}" if failed else ""))
-    if not frames:
-        raise SystemExit("no store could be read")
+    if not frames or len(failed) > MAX_FAILED_STORES:
+        raise SystemExit(f"{len(failed)} stores could not be read: the catalog was not changed")
     return pd.concat(frames, ignore_index=True)
 
 

@@ -1,0 +1,63 @@
+name: Measure courts in DataJud
+
+on:
+  schedule:
+    - cron: "0 10 * * *" # 07:00 in Brasília, after the e-NatJus collection
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: Minutes to spend starting courts
+        default: "50"
+      courts:
+        description: Courts to measure now, such as trf5,tjsc (empty means all that are due)
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect
+
+jobs:
+  courts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Measure
+        run: |
+          if [ -n "$COURTS" ]; then
+            python datajud.py --minutes "$MINUTES" --courts "$COURTS"
+          else
+            python datajud.py --minutes "$MINUTES"
+          fi
+        env:
+          MINUTES: ${{ inputs.minutes || '50' }}
+          COURTS: ${{ inputs.courts }}
+
+      - name: Save progress
+        if: ${{ !cancelled() }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/judiciario.csv 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "Nothing new to save"
+          else
+            git commit -m "Update DataJud court figures"
+            git pull --rebase
+            git push
+          fi
+
+      - name: Save to the database
+        if: ${{ !cancelled() }}
+        run: python save_db.py
+        env:
+          JUDICIAL_DB_URL: ${{ secrets.JUDICIAL_DB_URL }}

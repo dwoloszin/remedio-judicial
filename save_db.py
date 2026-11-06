@@ -1,8 +1,9 @@
 """
 save_db.py: copy the CSVs in data/ into JUDICIAL_DB_URL.
 
-The CSVs are the source of truth, so each run replaces the tables in one
+The CSVs are the source of truth, so each run recreates the tables in one
 transaction. A failed run leaves the database as it was and loses nothing.
+A CSV that does not exist yet is skipped.
 """
 
 import os
@@ -31,6 +32,7 @@ TABLES = {
     "notas": """
         termo         TEXT PRIMARY KEY,
         notas         INTEGER NOT NULL,
+        favoraveis    INTEGER,
         preco_max     NUMERIC(12, 2),
         atualizado_em DATE NOT NULL
     """,
@@ -40,9 +42,27 @@ TABLES = {
         preco_max        NUMERIC(12, 2),
         notas_min        INTEGER NOT NULL,
         notas_max        INTEGER NOT NULL,
+        termo_principal  TEXT NOT NULL,
+        favoraveis       INTEGER,
+        pct_favoravel    NUMERIC(5, 1),
         termos_coletados INTEGER NOT NULL,
         termos_total     INTEGER NOT NULL,
         atualizado_em    DATE NOT NULL
+    """,
+    "judiciario": """
+        tribunal       TEXT PRIMARY KEY,
+        periodo        TEXT NOT NULL,
+        acoes          INTEGER NOT NULL,
+        amostra        INTEGER NOT NULL,
+        com_julgamento INTEGER NOT NULL,
+        procedentes    INTEGER NOT NULL,
+        parciais       INTEGER NOT NULL,
+        improcedentes  INTEGER NOT NULL,
+        pct_favoravel  NUMERIC(5, 1),
+        dias_mediana   NUMERIC(8, 1),
+        dias_p25       NUMERIC(8, 1),
+        dias_p75       NUMERIC(8, 1),
+        atualizado_em  DATE NOT NULL
     """,
     "historico": """
         data  DATE NOT NULL,
@@ -71,10 +91,14 @@ def main() -> int:
     try:
         with psycopg2.connect(url, connect_timeout=30) as connection, connection.cursor() as cursor:
             for table, columns in TABLES.items():
+                if not (DATA / f"{table}.csv").exists():
+                    print(f"{table}: no CSV yet, skipped")
+                    continue
                 names, rows = read_rows(table)
-                cursor.execute(f"CREATE TABLE IF NOT EXISTS {table} ({columns})")
-                cursor.execute(f"DELETE FROM {table}")
-                execute_values(cursor, f"INSERT INTO {table} ({', '.join(names)}) VALUES %s", rows)
+                cursor.execute(f"DROP TABLE IF EXISTS {table}")
+                cursor.execute(f"CREATE TABLE {table} ({columns})")
+                if rows:
+                    execute_values(cursor, f"INSERT INTO {table} ({', '.join(names)}) VALUES %s", rows)
                 print(f"{table}: {len(rows):,} rows")
     except psycopg2.Error as error:
         print(f"Database error: {type(error).__name__}")  # the message could hold the host

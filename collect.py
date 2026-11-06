@@ -5,8 +5,12 @@ Terms never collected come first: hand-picked extras, then the highest CMED pric
 Once every term has a count, the oldest count is refreshed first, so each daily run
 continues where the last one stopped.
 
-Only the total for each term is read. Individual notes are never opened, because
-they contain patient details.
+Two totals are read for each term: all notes, and notes whose technical conclusion
+was favorable to the patient. Every note is either favorable or not favorable, so
+the second total gives the share of favorable opinions. That is the opinion the judge
+receives, not the judge's decision.
+
+Individual notes are never opened, because they contain patient details.
 """
 
 import argparse
@@ -34,7 +38,8 @@ PAUSE_SECONDS = 6
 REQUEST_TIMEOUT = 60
 RETRY_WAITS = (10, 20)
 MAX_FAILURES_IN_A_ROW = 5
-COUNT_COLUMNS = ["termo", "notas", "preco_max", "atualizado_em"]
+FAVORABLE = "F"  # value of the search's "Conclusão" filter
+COUNT_COLUMNS = ["termo", "notas", "favoraveis", "preco_max", "atualizado_em"]
 
 
 class SearchFailed(Exception):
@@ -55,10 +60,12 @@ class NatJusSearch:
             raise SearchFailed("search token not found: the page changed")
         self.token = match.group(1)
 
-    def _ask(self, term: str) -> int:
+    def _ask(self, term: str, conclusion: str) -> int:
         if self.token is None:
             self._refresh_token()
         params = {"token": self.token, "selTipoTecnologia": 1, "txtDcb": term, "pagina": 1}
+        if conclusion:
+            params["selConclusao"] = conclusion
         response = self.session.post(f"{BASE_URL}/api/pesquisaPublica/listar", params=params, timeout=REQUEST_TIMEOUT)
         if response.status_code != 200:
             raise SearchFailed(f"HTTP {response.status_code}")
@@ -70,11 +77,11 @@ class NatJusSearch:
             raise SearchFailed("answer has no total")
         return int(total)
 
-    def count(self, term: str) -> int:
+    def count(self, term: str, conclusion: str = "") -> int:
         """Total notes for one term. A retry gets a new token, in case the old one expired."""
         for wait in (*RETRY_WAITS, None):
             try:
-                return self._ask(term)
+                return self._ask(term, conclusion)
             except (SearchFailed, requests.RequestException) as error:
                 if wait is None:
                     raise SearchFailed(f"{term}: {error}") from error
@@ -102,8 +109,11 @@ def read_counts() -> pd.DataFrame:
 
 
 def build_queue(terms: pd.DataFrame, counts: pd.DataFrame) -> pd.DataFrame:
-    queue = terms.merge(counts[["termo", "atualizado_em"]], on="termo", how="left")
+    if "favoraveis" not in counts:
+        counts = counts.assign(favoraveis="")
+    queue = terms.merge(counts[["termo", "favoraveis", "atualizado_em"]], on="termo", how="left")
     queue["atualizado_em"] = queue["atualizado_em"].fillna("")  # '' sorts first: never collected
+    queue.loc[queue["favoraveis"].fillna("") == "", "atualizado_em"] = ""  # counted before favoraveis existed
     return queue.sort_values(
         ["atualizado_em", "extra", "preco_max", "termo"],
         ascending=[True, False, False, True],
@@ -114,6 +124,8 @@ def build_queue(terms: pd.DataFrame, counts: pd.DataFrame) -> pd.DataFrame:
 def save_counts(rows: dict) -> None:
     table = pd.DataFrame(rows.values(), columns=COUNT_COLUMNS)
     table["preco_max"] = pd.to_numeric(table["preco_max"], errors="coerce")
+    # Rows saved before favoraveis existed lack it, which would turn the column into floats.
+    table["favoraveis"] = pd.to_numeric(table["favoraveis"], errors="coerce").astype("Int64")
     table = table.sort_values(["preco_max", "termo"], ascending=[False, True], na_position="last")
     table.to_csv(COUNTS, index=False, encoding="utf-8", lineterminator="\n")
 
@@ -125,12 +137,23 @@ def save_medicines() -> None:
     Some terms share no notes (RIBOCICLIBE, SUCCINATO DE RIBOCICLIBE) and others are
     nested (LOSARTANA, LOSARTANA POTÁSSICA). The true count is therefore between the
     largest term (notas_min) and the sum of the terms (notas_max).
+
+    The share of favorable opinions comes from the largest term (termo_principal),
+    since it cannot be combined across terms that may overlap.
     """
     catalog = pd.read_csv(CATALOG, keep_default_na=False)
     catalog["termo"] = catalog["termos_busca"].str.split(TERM_SEPARATOR, regex=False)
     catalog["termos_total"] = catalog["termo"].str.len()
-    rows = catalog.explode("termo").merge(read_counts()[["termo", "notas", "atualizado_em"]], on="termo")
+    counts = read_counts()
+    rows = catalog.explode("termo").merge(counts[["termo", "notas", "favoraveis", "atualizado_em"]], on="termo")
     rows["notas"] = pd.to_numeric(rows["notas"])
+    rows["favoraveis"] = pd.to_numeric(rows["favoraveis"], errors="coerce")
+
+    main_term = rows.loc[rows.groupby("principio_ativo")["notas"].idxmax(), ["principio_ativo", "termo", "notas", "favoraveis"]]
+    main_term["pct_favoravel"] = (100 * main_term["favoraveis"] / main_term["notas"].where(main_term["notas"] > 0)).round(1)
+    main_term = main_term.rename(columns={"termo": "termo_principal"}).drop(columns="notas")
+    main_term["favoraveis"] = main_term["favoraveis"].astype("Int64")
+
     table = rows.groupby("principio_ativo", as_index=False).agg(
         marcas=("marcas", "first"),
         preco_max=("preco_max", "first"),
@@ -140,6 +163,9 @@ def save_medicines() -> None:
         termos_total=("termos_total", "first"),
         atualizado_em=("atualizado_em", "min"),
     )
+    table = table.merge(main_term, on="principio_ativo")
+    table = table[["principio_ativo", "marcas", "preco_max", "notas_min", "notas_max", "termo_principal",
+                   "favoraveis", "pct_favoravel", "termos_coletados", "termos_total", "atualizado_em"]]
     table = table.sort_values(["notas_max", "principio_ativo"], ascending=[False, True])
     table.to_csv(MEDICINES, index=False, encoding="utf-8", lineterminator="\n")
 
@@ -182,6 +208,8 @@ def main() -> int:
         time.sleep(PAUSE_SECONDS)
         try:
             notes = search.count(term.termo)
+            time.sleep(PAUSE_SECONDS)
+            favorable = search.count(term.termo, FAVORABLE)
         except SearchFailed as error:
             failures_in_a_row += 1
             print(f"FAILED {error}")
@@ -191,17 +219,23 @@ def main() -> int:
             continue
         failures_in_a_row = 0
 
-        previous = rows.get(term.termo, {}).get("notas")
+        known_row = rows.get(term.termo, {})
+        previous = known_row.get("notas")
         had_notes = previous not in (None, "") and int(previous) > 0
         if notes == 0 and had_notes:  # keep the count, but move on so the queue does not stall
             suspicious += 1
             print(f"SUSPICIOUS {term.termo}: 0 notes, had {previous}; keeping {previous}")
             notes = int(previous)
+            favorable = known_row.get("favoraveis", "")
         elif previous in (None, "") or int(previous) != notes:
             append_history(today, term.termo, notes)
+        if favorable != "" and int(favorable) > notes:
+            print(f"SUSPICIOUS {term.termo}: {favorable} favorable of {notes}; not saved")
+            favorable = ""
 
         price = "" if pd.isna(term.preco_max) else term.preco_max
-        rows[term.termo] = {"termo": term.termo, "notas": notes, "preco_max": price, "atualizado_em": today}
+        rows[term.termo] = {"termo": term.termo, "notas": notes, "favoraveis": favorable,
+                            "preco_max": price, "atualizado_em": today}
         save_counts(rows)
         done += 1
 
